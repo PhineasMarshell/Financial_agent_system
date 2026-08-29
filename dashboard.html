@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Agent Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+
+        .signal-enter {
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .pulse-dot {
+            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            }
+
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+            }
+
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+            }
+        }
+
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(55, 65, 81, 0.5);
+        }
+
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
+    <nav class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                    AI</div>
+                <h1 class="text-lg font-bold tracking-tight">Financial Agent <span class="text-blue-400">System</span>
+                </h1>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <div id="ws-status" class="flex items-center gap-2 text-gray-400">
+                    <span class="w-2 h-2 rounded-full bg-red-500 transition-colors" id="ws-dot"></span>
+                    <span id="ws-text">Disconnected</span>
+                </div>
+                <div class="text-gray-500 font-mono" id="clock">--:--:--</div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="stats-grid"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左栏：实时信号流 -->
+            <div class="lg:col-span-5 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">📡 实时信号流</h2>
+                    <span class="text-xs text-gray-500" id="signal-count">加载中...</span>
+                </div>
+                <div id="signals-container" class="space-y-3 max-h-[calc(100vh-240px)] overflow-y-auto pr-1"></div>
+            </div>
+
+            <!-- 中栏：持仓 + 交易 -->
+            <div class="lg:col-span-4 space-y-6">
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">💼 当前持仓</h2>
+                    <div id="positions-container" class="space-y-3"></div>
+                </div>
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">📋 最近交易</h2>
+                    <div class="glass-panel rounded-xl overflow-hidden">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-800/50 text-gray-400 text-xs">
+                                <tr>
+                                    <th class="px-4 py-2 text-left">标的</th>
+                                    <th class="px-4 py-2 text-left">方向</th>
+                                    <th class="px-4 py-2 text-right">价格</th>
+                                    <th class="px-4 py-2 text-right">盈亏</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-tbody" class="divide-y divide-gray-800"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右栏：绩效 + 日志 -->
+            <div class="lg:col-span-3 space-y-6">
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">📈 Agent 绩效</h2>
+                    <div class="glass-panel rounded-xl p-4">
+                        <div class="relative h-48">
+                            <canvas id="performance-chart"></canvas>
+                        </div>
+                        <div id="performance-stats" class="mt-4 space-y-2 text-sm"></div>
+                    </div>
+                </div>
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">📝 系统日志</h2>
+                    <div id="log-container"
+                        class="glass-panel rounded-xl p-3 h-48 overflow-y-auto font-mono text-xs space-y-1"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.host}`;
+        const WS_URL = (location.protocol === 'file:') ? 'ws://localhost:8000/ws' : `ws://${location.host}/ws`;
+        let ws = null, perfChart = null;
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatTime(iso) {
+            if (!iso) return '--';
+            const d = new Date(iso);
+            return d.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        function getSignalColor(signal) {
+            if (!signal) return 'gray';
+            const s = signal.toUpperCase();
+            if (s.includes('STRONG_BULLISH')) return 'green';
+            if (s.includes('BULLISH')) return 'emerald';
+            if (s.includes('STRONG_BEARISH')) return 'red';
+            if (s.includes('BEARISH')) return 'rose';
+            return 'gray';
+        }
+
+        function getStatusBadge(status) {
+            const map = {
+                'PENDING': ['bg-gray-800', 'text-gray-300', '待执行'],
+                'EXECUTED': ['bg-blue-900/50', 'text-blue-300', '已执行'],
+                'SKIPPED': ['bg-yellow-900/50', 'text-yellow-300', '已跳过'],
+                'FAILED': ['bg-red-900/50', 'text-red-300', '失败']
+            };
+            const [bg, text, label] = map[status] || map['PENDING'];
+            return `<span class="px-2 py-0.5 rounded text-xs font-medium ${bg} ${text}">${label}</span>`;
+        }
+
+        function log(msg, type = 'info') {
+            const container = document.getElementById('log-container');
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            const colors = { info: 'text-gray-400', success: 'text-green-400', warn: 'text-yellow-400', error: 'text-red-400' };
+            div.className = colors[type] || 'text-gray-400';
+            div.textContent = `[${time}] ${msg}`;
+            container.prepend(div);
+            if (container.children.length > 100) container.lastChild.remove();
+        }
+
+        async function api(path) {
+            try {
+                const res = await fetch(`${API_BASE}${path}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return await res.json();
+            } catch (e) {
+                log(`API Error: ${path} - ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        function renderStats(data) {
+            const items = [
+                { label: '总信号', value: data.total_signals, color: 'blue', icon: '📡' },
+                { label: '今日信号', value: data.today_signals, color: 'purple', icon: '📅' },
+                { label: '持仓中', value: data.open_trades, color: 'amber', icon: '💼' },
+                { label: '累计盈亏', value: `${data.total_pnl >= 0 ? '+' : ''}${data.total_pnl} USDC`, color: data.total_pnl >= 0 ? 'green' : 'red', icon: '💰' },
+            ];
+            document.getElementById('stats-grid').innerHTML = items.map(item => `
+        <div class="glass-panel rounded-xl p-4 border-l-4 border-${item.color}-500">
+          <div class="text-gray-400 text-xs uppercase tracking-wider">${item.icon} ${item.label}</div>
+          <div class="mt-2 text-2xl font-bold text-${item.color}-400">${item.value}</div>
+        </div>
+      `).join('');
+        }
+
+        function renderSignalCard(s) {
+            const color = getSignalColor(s.signal);
+            const time = formatTime(s.created_at);
+            const source = escapeHtml(s.source) || 'unknown';
+            const snippet = escapeHtml(s.content_snippet) || '无内容';
+            const sigLabel = escapeHtml(s.signal) || 'N/A';
+            const tickers = (s.tickers && s.tickers.length) ? escapeHtml(s.tickers.join(', ')) : '';
+            const reasoning = escapeHtml(s.reasoning) || 'N/A';
+            const drivers = (s.key_drivers && s.key_drivers.length) ? escapeHtml(s.key_drivers.join(', ')) : '';
+            const risks = (s.risk_factors && s.risk_factors.length) ? escapeHtml(s.risk_factors.join(', ')) : '';
+            return `
+        <div class="glass-panel rounded-xl p-4 border-l-4 border-${color}-500 hover:bg-gray-800/50 transition-colors cursor-pointer" onclick="toggleDetail('${s.id}')">
+          <div class="flex items-start justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 font-mono">${time}</span>
+              <span class="text-xs text-gray-400">${source}</span>
+            </div>
+            ${getStatusBadge(s.execution_status)}
+          </div>
+          <div class="text-sm text-gray-200 mb-2 line-clamp-2">${snippet}</div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 rounded text-xs font-bold bg-${color}-900/50 text-${color}-300 border border-${color}-700/50">${sigLabel}</span>
+            <span class="text-xs text-gray-500">置信度: ${s.confidence || 0}/10</span>
+            ${tickers ? `<span class="text-xs text-gray-400 font-mono">${tickers}</span>` : ''}
+          </div>
+          <div id="detail-${s.id}" class="hidden mt-3 pt-3 border-t border-gray-700 text-xs space-y-1">
+            <div class="text-gray-400">推理: ${reasoning}</div>
+            ${s.entry_price ? `<div class="text-gray-400 font-mono">入场: ${s.entry_price} | 止损: ${s.stop_loss || '-'} | 止盈: ${s.take_profit || '-'}</div>` : ''}
+            ${drivers ? `<div class="text-gray-500">驱动: ${drivers}</div>` : ''}
+            ${risks ? `<div class="text-gray-500">风险: ${risks}</div>` : ''}
+          </div>
+        </div>
+      `;
+        }
+
+        function toggleDetail(id) {
+            const el = document.getElementById(`detail-${id}`);
+            if (el) el.classList.toggle('hidden');
+        }
+
+        async function loadSignals() {
+            const data = await api('/api/signals?limit=30');
+            if (!data) return;
+            document.getElementById('signal-count').textContent = `${data.length} 条`;
+            document.getElementById('signals-container').innerHTML = data.map(renderSignalCard).join('');
+        }
+
+        function renderPosition(t) {
+            const isBuy = t.side === 'BUY';
+            const pnl = t.unrealized_pnl || 0;
+            const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+            return `
+        <div class="glass-panel rounded-xl p-4 border-l-4 ${isBuy ? 'border-green-500' : 'border-red-500'}">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-lg">${escapeHtml(t.ticker)}</span>
+              <span class="px-2 py-0.5 rounded text-xs font-medium ${isBuy ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}">${isBuy ? '做多' : '做空'}</span>
+            </div>
+            <span class="${pnlColor} font-mono font-bold">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDC</span>
+          </div>
+          <div class="text-xs text-gray-400 space-y-0.5">
+            <div>数量: ${t.executed_qty} | 均价: ${t.executed_price}</div>
+            <div>止损: ${t.stop_loss || '-'} | 止盈: ${t.take_profit || '-'}</div>
+          </div>
+        </div>
+      `;
+        }
+
+        async function loadPositions() {
+            const data = await api('/api/trades?status=OPEN');
+            if (!data) return;
+            const container = document.getElementById('positions-container');
+            if (data.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-sm text-center py-8">暂无持仓</div>';
+                return;
+            }
+            container.innerHTML = data.map(renderPosition).join('');
+        }
+
+        function renderTradeRow(t) {
+            const isBuy = t.side === 'BUY';
+            const pnl = t.realized_pnl;
+            const pnlColor = pnl === undefined || pnl === null ? 'text-gray-400' : (pnl >= 0 ? 'text-green-400' : 'text-red-400');
+            const pnlText = pnl === undefined || pnl === null ? '-' : `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
+            return `
+        <tr class="hover:bg-gray-800/30 transition-colors">
+          <td class="px-4 py-2 font-medium">${escapeHtml(t.ticker)}</td>
+          <td class="px-4 py-2"><span class="${isBuy ? 'text-green-400' : 'text-red-400'}">${isBuy ? '买' : '卖'}</span></td>
+          <td class="px-4 py-2 text-right font-mono">${t.executed_price || '-'}</td>
+          <td class="px-4 py-2 text-right font-mono ${pnlColor}">${pnlText}</td>
+        </tr>
+      `;
+        }
+
+        async function loadTrades() {
+            const data = await api('/api/trades?limit=10');
+            if (!data) return;
+            const tbody = document.getElementById('trades-tbody');
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500 text-sm">暂无交易记录</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.map(renderTradeRow).join('');
+        }
+
+        async function loadPerformance() {
+            const data = await api('/api/performance/gold');
+            if (!data || data.error) return;
+
+            document.getElementById('performance-stats').innerHTML = `
+        <div class="flex justify-between"><span class="text-gray-400">总信号</span><span class="font-mono">${data.total_signals}</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">已平仓</span><span class="font-mono">${data.closed_trades}</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">胜率</span><span class="font-mono ${data.win_rate_pct >= 50 ? 'text-green-400' : 'text-red-400'}">${data.win_rate_pct}%</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">总盈亏</span><span class="font-mono ${data.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}">${data.total_pnl >= 0 ? '+' : ''}${data.total_pnl} USDC</span></div>
+        <div class="flex justify-between"><span class="text-gray-400">平均盈亏</span><span class="font-mono">${data.avg_pnl_per_trade} USDC</span></div>
+      `;
+
+            const chartData = [Math.max(0, data.win_rate_pct), Math.max(0, 100 - data.win_rate_pct)];
+            const ctx = document.getElementById('performance-chart').getContext('2d');
+            if (perfChart) {
+                // 复用已有图表实例，只更新数据，避免反复 destroy 重建导致闪烁与高度累积
+                perfChart.data.datasets[0].data = chartData;
+                perfChart.update();
+                return;
+            }
+            perfChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['盈利', '亏损'],
+                    datasets: [{
+                        data: chartData,
+                        backgroundColor: ['#22c55e', '#ef4444'],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(17,24,39,0.9)',
+                            titleColor: '#e5e7eb',
+                            bodyColor: '#e5e7eb',
+                            borderColor: '#374151',
+                            borderWidth: 1,
+                        }
+                    },
+                    cutout: '70%',
+                }
+            });
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => {
+                document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-green-500 pulse-dot';
+                document.getElementById('ws-text').textContent = 'Live';
+                document.getElementById('ws-text').className = 'text-green-400';
+                log('WebSocket 已连接', 'success');
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'new_signal') {
+                        const s = msg.data;
+                        log(`新信号: ${s.signal} | ${s.tickers?.join(',') || '?'} | ${s.content_snippet?.slice(0, 30) || ''}...`, 'success');
+                        const container = document.getElementById('signals-container');
+                        const card = document.createElement('div');
+                        card.innerHTML = renderSignalCard(s);
+                        const node = card.firstElementChild;
+                        node.classList.add('signal-enter');
+                        container.prepend(node);
+                        if (container.children.length > 50) container.lastChild.remove();
+                        document.getElementById('signal-count').textContent = `${container.children.length} 条`;
+                    }
+                } catch (e) {
+                    log(`WS 消息解析失败: ${e.message}`, 'error');
+                }
+            };
+            ws.onclose = () => {
+                document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-red-500';
+                document.getElementById('ws-text').textContent = 'Disconnected';
+                document.getElementById('ws-text').className = 'text-gray-400';
+                log('WebSocket 断开，5秒后重连...', 'warn');
+                setTimeout(connectWebSocket, 5000);
+            };
+            ws.onerror = (e) => {
+                log('WebSocket 错误', 'error');
+            };
+        }
+
+        function updateClock() {
+            document.getElementById('clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        async function refreshAll() {
+            await loadSignals();
+            await loadPositions();
+            await loadTrades();
+            await loadPerformance();
+            const summary = await api('/api/account/summary');
+            if (summary) renderStats(summary);
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            refreshAll();
+            setInterval(updateClock, 1000);
+            setInterval(refreshAll, 10000); // 每10秒刷新一次非实时数据
+            updateClock();
+        });
+    </script>
+</body>
+
+</html>

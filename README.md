@@ -1,6 +1,6 @@
 # Financial Agent System（金融智能体系统）
 
-基于 **LangGraph** 的多智能体金融新闻分析与自动交易系统。系统实时监听市场新闻流，通过路由 Agent 判断新闻与各交易标的的相关性，并行分发到对应领域的分析 Agent（黄金 / 比特币），生成带止盈止损的交易信号并入库，最后由交易执行器在 **Hyperliquid** 上自动执行。同时提供 Web 仪表盘实时展示信号、持仓与绩效。（框架已写好其余无论是相应货币还是要加skill直接写即可）
+基于 **LangGraph** 的多智能体金融新闻分析与自动交易系统。系统实时监听市场新闻流，通过路由 Agent 判断新闻与各交易标的的相关性，在分发到具体领域分析前自动注入**宏观市场快照**（美元指数、美债收益率、VIX、BTC 资金费率等），再由并行分析 Agent（黄金 / 比特币）结合宏观上下文生成带止盈止损的交易信号并入库，最后由交易执行器在 **Hyperliquid** 上自动执行。同时提供 Web 仪表盘实时展示信号、持仓与绩效。（框架已写好，无论是切换货币还是要加 skill 直接写即可）
 
 > ⚠️ **免责声明**：本项目仅用于学习与研究目的，不构成任何投资建议。加密货币交易风险极高，请务必先在小额资金或**测试网（testnet）**上验证，自行承担一切交易风险。
 
@@ -9,6 +9,7 @@
 ## ✨ 核心功能
 
 - **多智能体协作**：路由 Agent（`Finance_Information_Router`） + 领域分析 Agent（`Gold_AnalystAgent`、`BTC_AnalystAgent`），一条新闻可触发多个 Agent 并行分析
+- **宏观市场快照**：每次分析前自动拉取 DXY、US10Y、标普期货、VIX、BTC 资金费率，5 分钟 TTL 缓存，计算整体风险偏好（`risk_on` / `neutral` / `risk_off`）并注入下游 Agent
 - **LangGraph 工作流**：基于状态机的条件分发，每篇新闻独立执行，支持并发处理
 - **实时新闻接入**：WebSocket 监听市场新闻，异步缓冲队列（容量 1000）缓解高峰压力、保护 LLM 接口
 - **结构化交易信号**：分析 Agent 输出 Markdown + JSON 混合报告，自动提取并清洗信号（方向、置信度、时间跨度、入场/止损/止盈价、仓位、关键驱动因素、风险因素）
@@ -26,14 +27,14 @@
  WebSocket ───────► │                                             │
  (ws_fetcher)       │   Router Agent ──► 是否相关？──不是──► End  │
       │             │      │                  │是                 │
-      ▼             │      ▼ 并行分发          ▼                  │
- asyncio 队列 ─────►│    Gold_Analyst     BTC_Analyst             │
- (容量1000)         │      │                  │                   │
-                    │      └────┬─────────────┘                   │
-                    │           ▼                                 │
-                    │    信号提取 + 数据清洗 + SQLite 入库 ──────┐ │
-                    └────────────────────────────────────────────┘│
-                                             ▼
+      ▼             │      ▼ 注入宏观快照      ▼                  │
+ asyncio 队列 ─────►│   Macro Snapshot    Gold_Analyst     BTC_Analyst
+ (容量1000)         │   (DXY+US10Y+VIX+…)  │                   │
+                    │                      └────┬─────────────┘
+                    │                             ▼
+                    │                     信号提取 + 数据清洗 + SQLite 入库 ─┐│
+                    └───────────────────────────────────────────────────────┘│
+                                                  ▼
                               ┌────────────────────────────────────────────┐
                               │   TradeExecutor（每 30s 轮询）             │
                               │    RiskEngine 风控 ──► Hyperliquid 下单    │
@@ -48,9 +49,22 @@
 | 节点 | 说明 |
 |---|---|
 | `router_node` | 路由 Agent 判断新闻相关性，输出 `dispatch` 决策与推理 |
-| `gold_agent_node` | 黄金分析 Agent，生成报告 + 交易信号并入库 |
-| `btc_agent_node` | 比特币分析 Agent，生成报告 + 交易信号并入库 |
+| `macro_snapshot_node` | 自动拉取宏观指标（DXY、US10Y、标普期货、VIX、BTC 资金费率），计算风险偏好并注入 state |
+| `gold_agent_node` | 黄金分析 Agent，结合宏观上下文生成报告 + 交易信号并入库 |
+| `btc_agent_node` | 比特币分析 Agent，结合宏观上下文生成报告 + 交易信号并入库 |
 | `end_node` | 汇总报告，结束流程 |
+
+### 宏观快照覆盖的指标
+
+| 指标 | Ticker | 含义 |
+|---|---|---|
+| DXY | `DX-Y.NYB` | ICE 美元指数 — 强美元压制风险资产 |
+| US10Y | `^TNX` | CBOE 10 年期美债收益率 — 流动性风向标 |
+| 标普 E-mini 期货 | `ES=F` | 全球权益情绪代理 |
+| VIX | `^VIX` | 恐慌指数 — >25 触发风险降级 |
+| BTC 资金费率 | Hyperliquid API | 多头/空头力量对比 |
+
+系统根据上述指标打分，输出 `market_regime`（`risk_on` / `neutral` / `risk_off`）及判定依据，供下游 Agent 辅助判断。
 
 ---
 
@@ -60,7 +74,7 @@
 |---|---|
 | **LLM / Agent** | `openai`、`langgraph`、`langchain-core`、`langsmith` |
 | **交易执行** | `hyperliquid-python-sdk`、`eth-account` |
-| **数据接入** | `websockets`、`ddgs`（DuckDuckGo 搜索）、`requests`、`beautifulsoup4` |
+| **数据接入** | `websockets`、`ddgs`（DuckDuckGo 搜索）、`requests`、`beautifulsoup4`、Yahoo Finance v8 chart API |
 | **基础设施** | `python-dotenv`、`pydantic`、`aiohttp`、`httpx`、`numpy`、`pandas`、`cryptography`、`pycryptodome`、`tqdm` |
 
 参见 [requirements.txt](requirements.txt)。
@@ -75,15 +89,14 @@ Financial_agent_system/
 ├── api_server.py                    # FastAPI 仪表盘服务（REST + WebSocket 实时推送）
 ├── dashboard.html                   # Web 仪表盘前端
 ├── fas-architecture.html / .json    # 系统架构图（可视化）
-├── test_trade_executor.py           # 交易执行器单元测试
 ├── financial_agent_db.db            # SQLite 数据库（运行时生成）
 ├── requirements.txt                 # Python 依赖
 ├── .env.example                     # 环境变量模板（见下方配置）
 └── src/
     ├── agents/
     │   ├── Finance_Information_Router.py   # 路由 Agent：相关性判断与领域分发
-    │   ├── Gold_analyst.py                 # 黄金分析 Agent
-    │   └── BTC_analyst.py                  # 比特币分析 Agent
+    │   ├── Gold_analyst.py                 # 黄金分析 Agent（集成宏观快照）
+    │   └── BTC_analyst.py                  # 比特币分析 Agent（集成宏观快照）
     ├── database/
     │   └── db_manager.py                   # SQLite 数据管理（signals / trades 表）
     ├── execution/
@@ -91,7 +104,8 @@ Financial_agent_system/
     ├── gateway/
     │   └── ws_fetcher.py                   # WebSocket 新闻接入与格式标准化
     └── tools/
-        ├── finance_tools.py                # Hyperliquid 工具统一入口
+        ├── hy_finance_tools.py             # Hyperliquid 行情查询工具
+        ├── macro_tools.py                  # 宏观快照工具（DXY / US10Y / VIX / BTC funding rate）
         ├── search_tools.py                 # 新闻舆情搜索工具
         ├── registry.py                     # 工具注册表
         └── tool_schemas.py                 # 工具 Schema 定义
@@ -148,7 +162,7 @@ python main.py
 启动后会同时运行三个后台任务：
 
 1. **WebSocket 新闻监听** — 实时接收市场新闻并入队
-2. **新闻处理循环** — 消费队列，逐篇执行 LangGraph 工作流并入库信号
+2. **新闻处理循环** — 消费队列，逐篇执行 LangGraph 工作流（含宏观快照 + Agent 并行分析）并入库信号
 3. **交易执行器轮询** — 每 30 秒扫描未执行信号，经风控后在 Hyperliquid 执行
 
 ### 4. 启动仪表盘
@@ -201,22 +215,9 @@ python api_server.py
 
 ---
 
-## 🧪 测试
-
-```bash
-python test_trade_executor.py
-```
-
----
-
 ## 🔧 常见问题
 
 - **信号一直不入库？** 检查 `.env` 中 `LLM_API_KEY` / `LLM_BASE_URL` 是否可用，以及日志中 Router 节点输出的相关性判断。
 - **交易未执行？** 确认 `HYPERLIQUID_NETWORK` 配置正确、账户有足够余额，且信号通过 `RiskEngine` 校验；日志中 `[ExecutorLoop]` 会打印扫描结果。
+- **宏观快照失败？** 默认使用 Yahoo Finance v8 chart API 和 Hyperliquid 公开接口，受网络环境影响较大；失败时日志提示 `[Macro] 宏观数据获取失败`，不会中断分析流程，只是本次不注入宏观约束。
 - **数据库文件** `financial_agent_db.db` 会在运行时自动创建/更新，如需重置请先备份。
-
----
-
-## 📄 License
-
-仅限学习与研究使用。使用本项目进行真实交易的风险由使用者自行承担。

@@ -218,7 +218,7 @@ class BTC_AnalystAgent():
 
         """ 
 
-        # ========== 构建宏观前缀（FIX）==========
+        # 构建宏观前缀
         macro_prefix = ""
         if macro_snapshot:
             regime = macro_snapshot.get("market_regime", "unknown")
@@ -227,21 +227,22 @@ class BTC_AnalystAgent():
             reasons_str = " | ".join(reasons) if reasons else "无明显宏观信号"
 
             macro_prefix = f"""【实时宏观环境快照】
-市场状态: {regime} (风险分: {risk_score})
-判定依据: {reasons_str}
-DXY: {macro_snapshot.get('dxy', {}).get('price', 'N/A')} ({macro_snapshot.get('dxy', {}).get('change_24h_pct', 'N/A')}%)
-US10Y: {macro_snapshot.get('us10y', {}).get('yield', 'N/A')}% ({macro_snapshot.get('us10y', {}).get('change_24h_bps', 'N/A')}bps)
-SPX期货: {macro_snapshot.get('spx_futures', {}).get('price', 'N/A')} ({macro_snapshot.get('spx_futures', {}).get('change_24h_pct', 'N/A')}%)
-VIX: {macro_snapshot.get('vix', {}).get('price', 'N/A')} ({macro_snapshot.get('vix', {}).get('change_24h_pct', 'N/A')}%)
-BTC: {macro_snapshot.get('btc', {}).get('price', 'N/A')} (资金费率: {macro_snapshot.get('btc', {}).get('funding_1h', 'N/A')}%)
+                市场状态: {regime} (风险分: {risk_score})
+                判定依据: {reasons_str}
+                DXY: {macro_snapshot.get('dxy', {}).get('price', 'N/A')} ({macro_snapshot.get('dxy', {}).get('change_24h_pct', 'N/A')}%)
+                US10Y: {macro_snapshot.get('us10y', {}).get('yield', 'N/A')}% ({macro_snapshot.get('us10y', {}).get('change_24h_bps', 'N/A')}bps)
+                SPX期货: {macro_snapshot.get('spx_futures', {}).get('price', 'N/A')} ({macro_snapshot.get('spx_futures', {}).get('change_24h_pct', 'N/A')}%)
+                VIX: {macro_snapshot.get('vix', {}).get('price', 'N/A')} ({macro_snapshot.get('vix', {}).get('change_24h_pct', 'N/A')}%)
+                黄金: {macro_snapshot.get('gold', {}).get('price', 'N/A')} ({macro_snapshot.get('gold', {}).get('change_24h_pct', 'N/A')}%)
+                BTC: {macro_snapshot.get('btc', {}).get('price', 'N/A')} (资金费率: {macro_snapshot.get('btc', {}).get('funding_1h', 'N/A')}%)
 
----
+                ---
 
-"""
+                """
 
         messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": new_text + macro_snapshot}
+                    {"role": "user", "content": new_text + macro_prefix}
                 ]
 
         # react循环

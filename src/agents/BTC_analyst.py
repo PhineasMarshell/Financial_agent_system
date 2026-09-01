@@ -13,7 +13,7 @@ class BTC_AnalystAgent():
             base_url=os.getenv("LLM_BASE_URL"),
         )
 
-    async def BTC_analyse(self, new_text):
+    async def BTC_analyse(self, new_text, macro_snapshot: dict = None):
         system_prompt = """
         # 角色定位
         你是全球顶级的 BTC（Bitcoin）量化交易分析师，专注于将实时信息流转化为可立即执行的永续合约交易决策。你深谙 BTC 的独有规律：高波动、24/7 连续交易、与宏观流动性/ETF 资金流/监管政策高度耦合，同时受美股风险偏好和美元指数（DXY）的间接牵引。你的分析必须兼顾永续合约的资金费率成本与清算风险，输出绝对专业、可落地。
@@ -21,8 +21,18 @@ class BTC_AnalystAgent():
         # 核心任务
         接收单条金融信息（来自推特/X、新闻源、链上监控或官方声明），分析其对 BTC-USDC 永续合约价格的即时影响，并生成包含具体交易参数的专业分析报告。
 
+        ## 宏观环境约束（必须遵守）
+        系统已自动注入实时宏观快照，分析前必须评估宏观逆风/顺风：
+        1. 若 market_regime = "risk_off"（风险分 ≥ 7）：
+           - DXY 暴涨或 US10Y 飙升时，禁止输出 STRONG_BULLISH
+           - 黄金信号最高只能到 BULLISH，且必须在报告中明确注明"宏观逆风，谨慎操作"
+           - 加密货币信号直接降级为 NEUTRAL 或更低
+        2. 若 market_regime = "risk_on"：
+           - 可正常按技术面和事件面分析
+        3. 若宏观数据缺失或不可用：
+           - 在报告开头明确标注"⚠️ 宏观数据缺失，分析基于单条信息，不确定性较高"
+        
         # 分析框架（必须严格执行）
-
         ## 第一步：信息解码
         1. **事件定性**：识别信息类型（ETF 资金流/央行政策/监管/宏观经济/链上异动/市场情绪/流动性事件/巨鲸转账）
         2. **BTC 关联度评估**：判断该事件与 BTC 价格的传导路径（ETF 供需/宏观流动性/美元走势/监管预期/风险情绪/减半周期叙事）
@@ -208,9 +218,30 @@ class BTC_AnalystAgent():
 
         """ 
 
+        # ========== 构建宏观前缀（FIX）==========
+        macro_prefix = ""
+        if macro_snapshot:
+            regime = macro_snapshot.get("market_regime", "unknown")
+            risk_score = macro_snapshot.get("risk_score", "N/A")
+            reasons = macro_snapshot.get("reasoning", [])
+            reasons_str = " | ".join(reasons) if reasons else "无明显宏观信号"
+
+            macro_prefix = f"""【实时宏观环境快照】
+市场状态: {regime} (风险分: {risk_score})
+判定依据: {reasons_str}
+DXY: {macro_snapshot.get('dxy', {}).get('price', 'N/A')} ({macro_snapshot.get('dxy', {}).get('change_24h_pct', 'N/A')}%)
+US10Y: {macro_snapshot.get('us10y', {}).get('yield', 'N/A')}% ({macro_snapshot.get('us10y', {}).get('change_24h_bps', 'N/A')}bps)
+SPX期货: {macro_snapshot.get('spx_futures', {}).get('price', 'N/A')} ({macro_snapshot.get('spx_futures', {}).get('change_24h_pct', 'N/A')}%)
+VIX: {macro_snapshot.get('vix', {}).get('price', 'N/A')} ({macro_snapshot.get('vix', {}).get('change_24h_pct', 'N/A')}%)
+BTC: {macro_snapshot.get('btc', {}).get('price', 'N/A')} (资金费率: {macro_snapshot.get('btc', {}).get('funding_1h', 'N/A')}%)
+
+---
+
+"""
+
         messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": new_text}
+                    {"role": "user", "content": new_text + macro_snapshot}
                 ]
 
         # react循环

@@ -2,7 +2,7 @@ HYPERLIQUID_QUERY_SCHEMA = {
   "type": "function",
   "function": {
     "name": "hyperliquid_query",
-    "description": "查询 Hyperliquid 交易所的加密货币最新价格或 K 线趋势。黄金资产必须且只能使用 'PAXG'。",
+    "description": "查询 Hyperliquid 交易所的加密货币最新价格或 K 线趋势。",
     "parameters": {
       "type": "object",
       "properties": {
@@ -13,7 +13,7 @@ HYPERLIQUID_QUERY_SCHEMA = {
         },
         "coin": {
           "type": "string",
-          "description": "币种代码，如 BTC, ETH, SOL, DOGE, HYPE 等。黄金为 PAXG。",
+          "description": "币种代码，如 BTC, ETH, SOL, DOGE, HYPE 等。",
           "enum": [
             "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "AVAX", "DOT", 
             "LINK", "MATIC", "ARB", "OP", "DOGE", "SHIB", "HYPE", 

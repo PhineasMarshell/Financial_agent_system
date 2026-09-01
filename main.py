@@ -7,6 +7,7 @@ from typing import TypedDict, List, Annotated, Dict, Any
 
 from src.database.db_manager import DatabaseManager
 from src.gateway.ws_fetcher import listen_to_market
+from src.tools.macro_tools import get_macro_snapshot
 from src.agents.Gold_analyst import Gold_AnalystAgent
 from src.agents.BTC_analyst import BTC_AnalystAgent
 from src.agents.Finance_Information_Router import Finance_Information_Router
@@ -23,6 +24,7 @@ class AgentState(TypedDict):
     """
     raw_content: Dict[str, Any]
     dispatch_result: Dict[str, Any]
+    macro_snapshot: Dict[str, Any]
     final_reports: Annotated[List[Dict[str, Any]], operator.add]
 
 class FinancialAgentSystem:
@@ -66,6 +68,20 @@ class FinancialAgentSystem:
             "final_reports": [result]
         }
 
+    # ========== 系统层：宏观快照注入 ==========
+    async def _macro_snapshot_node(self, state: AgentState):
+        """路由后自动拉取宏观数据，注入 state 供下游 Agent 使用"""
+        snapshot = await asyncio.to_thread(get_macro_snapshot)
+
+        if snapshot:
+            print(f"[Macro] 市场状态: {snapshot.get('market_regime', 'unknown')} | "
+                  f"风险分: {snapshot.get('risk_score', 'N/A')} | "
+                  f"依据: {' | '.join(snapshot.get('reasoning', []))}")
+        else:
+            print("[Macro] 宏观数据获取失败，本次分析不注入宏观约束")
+
+        return {"macro_snapshot": snapshot}
+
     # ========== 第二层：并行分发逻辑 ==========
     def dispatch_router(self, state: AgentState) -> List[Send]:
         """
@@ -76,9 +92,9 @@ class FinancialAgentSystem:
         active_sends = []
 
         # 检查各个金融领域的开关，为每个激活的领域创建 Send
-        # if dispatch.get('gold'):
-        #     active_sends.append(Send("gold_agent_node", state))
-        #     print(f"[Dispatch] → gold_agent_node | event_id={state['raw_content'].get('event_id')}")
+        if dispatch.get('gold'):
+            active_sends.append(Send("gold_agent_node", state))
+            print(f"[Dispatch] → gold_agent_node | event_id={state['raw_content'].get('event_id')}")
 
         if dispatch.get('btc'):
             active_sends.append(Send("btc_agent_node", state))
@@ -100,7 +116,8 @@ class FinancialAgentSystem:
         
         start_time = time.time()
         print(f"[Gold] 开始分析 | event_id={event_id}")
-        result = await self.gold_analyst.Gold_analyse(formatted_text)
+        macro = state.get("macro_snapshot", {})
+        result = await self.gold_analyst.Gold_analyse(formatted_text, macro_snapshot=macro)
         latency_ms = int((time.time() - start_time) * 1000)
         print(f"[Gold] 分析完成 | event_id={event_id} | 耗时={latency_ms}ms")
         
@@ -153,7 +170,8 @@ class FinancialAgentSystem:
         
         start_time = time.time()
         print(f"[BTC] 开始分析 | event_id={event_id}")
-        result = await self.btc_analyst.BTC_analyse(formatted_text)
+        macro = state.get("macro_snapshot", {})
+        result = await self.btc_analyst.BTC_analyse(formatted_text, macro_snapshot=macro)
         latency_ms = int((time.time() - start_time) * 1000)
         print(f"[BTC] 分析完成 | event_id={event_id} | 耗时={latency_ms}ms")
         
@@ -251,6 +269,7 @@ class FinancialAgentSystem:
 
         # 添加处理节点
         workflow.add_node("router_node", self._router_node)
+        workflow.add_node("macro_snapshot_node", self._macro_snapshot_node)
         workflow.add_node("gold_agent_node", self._gold_analyst_node)
         workflow.add_node("btc_agent_node", self._btc_analyst_node)
         workflow.add_node("end_node", self._end_node)
@@ -259,8 +278,9 @@ class FinancialAgentSystem:
         workflow.set_entry_point("router_node")
 
         # 配置条件跳转
+        workflow.add_edge("router_node", "macro_snapshot_node")
         workflow.add_conditional_edges(
-            "router_node",
+            "macro_snapshot_node",
             self.dispatch_router,
             [
                 "gold_agent_node",

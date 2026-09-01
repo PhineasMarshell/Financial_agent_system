@@ -13,13 +13,24 @@ class Gold_AnalystAgent():
             base_url=os.getenv("LLM_BASE_URL"),
         )
 
-    async def Gold_analyse(self, new_text):
+    async def Gold_analyse(self, new_text, macro_snapshot: dict = None):
         system_prompt = """
         # 角色定位
         你是全球顶级的黄金（XAU/PAXG）量化交易分析师，专注于将实时信息流转化为可立即执行的交易决策。你的分析基于宏观逻辑、市场情绪、技术面和资金流的交叉验证，输出必须绝对专业、可落地。
 
         # 核心任务
         接收单条金融信息（来自推特/X、新闻源或官方声明），分析其对黄金价格的即时影响，并生成包含具体交易参数的专业分析报告。
+
+        ## 宏观环境约束（必须遵守）
+        系统已自动注入实时宏观快照，分析前必须评估宏观逆风/顺风：
+        1. 若 market_regime = "risk_off"（风险分 ≥ 7）：
+           - DXY 暴涨或 US10Y 飙升时，禁止输出 STRONG_BULLISH
+           - 黄金信号最高只能到 BULLISH，且必须在报告中明确注明"宏观逆风，谨慎操作"
+           - 加密货币信号直接降级为 NEUTRAL 或更低
+        2. 若 market_regime = "risk_on"：
+           - 可正常按技术面和事件面分析
+        3. 若宏观数据缺失或不可用：
+           - 在报告开头明确标注"⚠️ 宏观数据缺失，分析基于单条信息，不确定性较高"
 
         # 分析框架（必须严格执行）
 
@@ -179,9 +190,30 @@ class Gold_AnalystAgent():
 
         """ 
 
+        # ========== 构建宏观前缀（FIX）==========
+        macro_prefix = ""
+        if macro_snapshot:
+            regime = macro_snapshot.get("market_regime", "unknown")
+            risk_score = macro_snapshot.get("risk_score", "N/A")
+            reasons = macro_snapshot.get("reasoning", [])
+            reasons_str = " | ".join(reasons) if reasons else "无明显宏观信号"
+
+            macro_prefix = f"""【实时宏观环境快照】
+市场状态: {regime} (风险分: {risk_score})
+判定依据: {reasons_str}
+DXY: {macro_snapshot.get('dxy', {}).get('price', 'N/A')} ({macro_snapshot.get('dxy', {}).get('change_24h_pct', 'N/A')}%)
+US10Y: {macro_snapshot.get('us10y', {}).get('yield', 'N/A')}% ({macro_snapshot.get('us10y', {}).get('change_24h_bps', 'N/A')}bps)
+SPX期货: {macro_snapshot.get('spx_futures', {}).get('price', 'N/A')} ({macro_snapshot.get('spx_futures', {}).get('change_24h_pct', 'N/A')}%)
+VIX: {macro_snapshot.get('vix', {}).get('price', 'N/A')} ({macro_snapshot.get('vix', {}).get('change_24h_pct', 'N/A')}%)
+BTC: {macro_snapshot.get('btc', {}).get('price', 'N/A')} (资金费率: {macro_snapshot.get('btc', {}).get('funding_1h', 'N/A')}%)
+
+---
+
+"""
+
         messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": new_text}
+                    {"role": "user", "content": macro_prefix + new_text}
                 ]
 
         # react循环

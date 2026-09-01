@@ -10,7 +10,7 @@ def search_news(query: str, max_results: int = 5, time_limit: str = 'd') -> str:
                 region="wt-wt",
                 safesearch="moderate",
                 timelimit=time_limit,
-                backend="html",  
+                backend="bing",
                 max_results=max_results
             )
             
